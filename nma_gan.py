@@ -1,127 +1,15 @@
-import glob
 import math
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.utils.data
-from PIL import Image
 from matplotlib import pyplot as plt, gridspec
-from sklearn.model_selection import train_test_split
 from torch import nn
-from torch.utils.data import Dataset
-from torchvision import transforms
 
-from stylegan2.model import Generator
 
 np.random.seed(0)
 NOISE_DIM = 96
-
-
-class FaceData(Dataset):
-    def __init__(self, device, train=True):
-        img_names = glob.glob("GS_data/cropped/*.png")
-        img_names_sorted = sorted(img_names)
-        N = len(img_names_sorted)
-
-        self.data = torch.empty((N, 3, 224, 224))
-        transform = transforms.Compose(
-            [
-                transforms.Resize(256),
-                transforms.CenterCrop(256),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ]
-        )
-
-        imgs = []
-
-        for imgfile in img_names_sorted:
-            img = transform(Image.open(imgfile).convert("RGB"))
-            imgs.append(img)
-
-        imgs = torch.stack(imgs, 0).to(device)
-
-        g_ema = Generator(256, 512, 8)
-        g_ema.load_state_dict(torch.load(args.ckpt)["g_ema"], strict=False)
-        g_ema.eval()
-        g_ema = g_ema.to(device)
-
-        self.y = torch.from_numpy(np.loadtxt('GS_data/gender.txt') > 0.5)
-        self.cf = torch.from_numpy(np.loadtxt('GS_data/skincolor.txt'))
-
-        if N != len(self.y) or N != len(self.cf):
-            raise ValueError("Data of improper length")
-
-        X_train, X_test, y_train, y_test, cf_train, cf_test = train_test_split(self.data, self.y, self.cf,
-                                                                               stratify=self.y,
-                                                                               test_size=0.25)
-
-        if train:
-            self.data = X_train.to(device=device)
-            self.y = y_train.to(device=device, dtype=torch.float)
-            self.cf = cf_train.to(device=device, dtype=torch.int)
-        else:
-            self.data = X_test.to(device=device)
-            self.y = y_test.to(device=device, dtype=torch.float)
-            self.cf = cf_test.to(device=device, dtype=torch.int)
-
-    def __getitem__(self, index):
-        return self.data[index], self.y[index], self.cf[index]
-
-    def __len__(self):
-        return len(self.y)
-
-
-class ToyData(Dataset):
-    def __init__(self, N=512):
-        """N = number of subjects in a group"""
-
-        def gkern(kernlen=21, nsig=3):
-            import numpy
-            import scipy.stats as st
-
-            """Returns a 2D Gaussian kernel array."""
-
-            interval = (2 * nsig + 1.) / (kernlen)
-            x = numpy.linspace(-nsig - interval / 2., nsig + interval / 2., kernlen + 1)
-            kern1d = numpy.diff(st.norm.cdf(x))
-            kernel_raw = numpy.sqrt(numpy.outer(kern1d, kern1d))
-            kernel = kernel_raw / kernel_raw.sum()
-            return kernel
-
-        ## Simulate Data
-        torch.manual_seed(0)
-
-        labels = torch.zeros((N * 2,))
-        labels[N:] = 1
-
-        # 2 confounding effects between 2 groups
-        self.cf = torch.empty((N * 2,))
-        self.cf[:N].uniform_(1, 4)
-        self.cf[N:].uniform_(3, 6)
-
-        # 2 major effects between 2 groups
-        self.mf = torch.empty((N * 2,))
-        self.mf[:N].uniform_(1, 4)
-        self.mf[N:].uniform_(3, 6)
-
-        # simulate images
-        self.x = torch.zeros((N * 2, 1, 32, 32))
-        self.y = torch.zeros((N * 2,))
-        self.y[N:] = 1
-        for i in range(N * 2):
-            self.x[i, 0, :16, :16] = torch.from_numpy(gkern(kernlen=16, nsig=5)) * self.mf[i]
-            self.x[i, 0, 16:, :16] = torch.from_numpy(gkern(kernlen=16, nsig=5)) * self.cf[i]
-            self.x[i, 0, :16, 16:] = torch.from_numpy(gkern(kernlen=16, nsig=5)) * self.cf[i]
-            self.x[i, 0, 16:, 16:] = torch.from_numpy(gkern(kernlen=16, nsig=5)) * self.mf[i]
-            self.x[i] = self.x[i] + torch.normal(0, 0.01, size=(1, 32, 32))
-
-    def __getitem__(self, index):
-        return self.x[index], self.y[index], self.cf[index]
-
-    def __len__(self):
-        return len(self.y)
 
 
 def sample_noise(batch_size, noise_dim, dtype=torch.float, device="cpu"):
@@ -287,7 +175,7 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
 
     iter_count = 0
     for epoch in range(num_epochs):
-        for x, y, cf, mf in loader_train:
+        for x, y, cf in loader_train:
             if len(x) != batch_size:
                 continue
 
