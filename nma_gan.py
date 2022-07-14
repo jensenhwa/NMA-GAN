@@ -52,6 +52,17 @@ def discriminator2():
     return model
 
 
+def discriminator2v(v_len=100):
+    model = nn.Sequential(
+        nn.Linear(1 + v_len + 1, 250),
+        nn.ReLU(),
+        nn.Linear(250, 250),
+        nn.ReLU(),
+        nn.Linear(250, 1),
+    )
+    return model
+
+
 def discriminator3():
     model = nn.Sequential(
         nn.Linear(2, 4),
@@ -59,6 +70,17 @@ def discriminator3():
         nn.Linear(4, 4),
         nn.LeakyReLU(),
         nn.Linear(4, 1),
+    )
+    return model
+
+
+def discriminator3v(v_len=100):
+    model = nn.Sequential(
+        nn.Linear(v_len + 1, 250),
+        nn.ReLU(),
+        nn.Linear(250, 250),
+        nn.ReLU(),
+        nn.Linear(250, 1),
     )
     return model
 
@@ -75,18 +97,30 @@ def generator(noise_dim=NOISE_DIM, latent_dim=100):
     return model
 
 
-def encoder(classifier=None):
+def encoder(classifier=None, final_activation="relu"):
     """
     Build an encoder, optionally using the weights of a classifier.
     """
-    model = nn.Sequential(
-        nn.Conv2d(1, 2, 5, 2),
-        nn.ReLU(),
-        nn.MaxPool2d(2),
-        nn.Conv2d(2, 4, 3),
-        nn.ReLU(),
-        nn.Flatten(),
-    )
+    if final_activation == "relu":
+        model = nn.Sequential(
+            nn.Conv2d(1, 2, 5, 2),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(2, 4, 3),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+    elif final_activation == "none":
+        model = nn.Sequential(
+            nn.Conv2d(1, 2, 5, 2),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(2, 4, 3),
+            nn.Flatten(),
+        )
+    else:
+        raise ValueError("Invalid argument for final_activation")
+
     if classifier is not None:
         model_dict = model.state_dict()
         pretrained_dict = {k: v for k, v in classifier.state_dict().items() if k in model_dict}
@@ -231,6 +265,85 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
             iter_count += 1
 
     return G, D2, D3
+
+
+def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_loss, device, show_every=250,
+              batch_size=128, num_epochs=10, l=1):
+    """
+    Train simple fair classification GAN in v-space
+    """
+
+    iter_count = 0
+    for epoch in range(num_epochs):
+        for x, y, cf in loader_train:
+            if len(x) != batch_size:
+                continue
+
+            for i in range(50):
+                D_solver.zero_grad()
+                real_data = x.view(-1, 1, 32, 32).to(device)
+                features = ENC(real_data)
+                preds = FF(features).detach().squeeze()
+
+                z_tilde = y.unsqueeze(1)
+                v_prime = features.detach()[torch.randperm(features.size()[0])]
+                s = cf.unsqueeze(1)  # sensitive atts
+                # print(v_prime)
+                # print(F.sigmoid(features))
+                # if i == 9:
+                #     assert False
+
+                logits_real2 = D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                logits_fake2 = D2(torch.cat((s, features, z_tilde), dim=1))
+                l2 = discriminator_loss(logits_real2, logits_fake2)
+
+                logits_real3 = D3(torch.cat((v_prime, z_tilde), dim=1))
+                logits_fake3 = D3(torch.cat((features, z_tilde), dim=1))
+                l3 = discriminator_loss(logits_real3, logits_fake3)
+
+                d_total_error = - F.binary_cross_entropy_with_logits(preds, y) + l2 + l3
+                # print(- F.binary_cross_entropy_with_logits(preds, y))
+                # print(l2)
+                # print(l3)
+                d_total_error.backward()
+                D_solver.step()
+                # print(f"  d{i}: {d_total_error}")
+
+            for i in range(10):
+                G_solver.zero_grad()
+                real_data = x.view(-1, 1, 32, 32).to(device)
+                features = ENC(real_data)
+                preds = FF(features).squeeze()
+
+                z_tilde = y.unsqueeze(1)
+                v_prime = features.detach()[torch.randperm(features.size()[0])]
+                s = cf.unsqueeze(1)  # sensitive atts
+
+                logits_real2 = D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                logits_fake2 = D2(torch.cat((s, features, z_tilde), dim=1))
+                l2 = discriminator_loss(logits_real2, logits_fake2)
+
+                logits_real3 = D3(torch.cat((v_prime, z_tilde), dim=1))
+                logits_fake3 = D3(torch.cat((features, z_tilde), dim=1))
+                l3 = discriminator_loss(logits_real3, logits_fake3)
+
+                l4 = (l2 - l3) ** 2
+                g_error = l4 * l + F.binary_cross_entropy_with_logits(preds, y)
+                g_error.backward()
+                G_solver.step()
+                # print(f"  g{i}: {g_error}")
+
+            # print(v_prime)
+            # print(features)
+            # print(F.sigmoid(features))
+
+            if (iter_count % show_every == 0):
+                print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
+                print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
+                print()
+            iter_count += 1
+
+    return D2, D3, ENC, FF
 
 
 def run_real_gan(loader_train, D1, D2, D3, G, ENC, D_solver, G_solver, discriminator_loss, generator_loss, device,
