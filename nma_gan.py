@@ -54,11 +54,11 @@ def discriminator2():
 
 def discriminator2v(v_len=100):
     model = nn.Sequential(
-        nn.Linear(1 + v_len + 1, 250),
+        nn.Linear(1 + v_len + 1, 200),
         nn.ReLU(),
-        nn.Linear(250, 250),
+        nn.Linear(200, 100),
         nn.ReLU(),
-        nn.Linear(250, 1),
+        nn.Linear(100, 1),
     )
     return model
 
@@ -76,11 +76,11 @@ def discriminator3():
 
 def discriminator3v(v_len=100):
     model = nn.Sequential(
-        nn.Linear(v_len + 1, 250),
+        nn.Linear(v_len + 1, 200),
         nn.ReLU(),
-        nn.Linear(250, 250),
+        nn.Linear(200, 100),
         nn.ReLU(),
-        nn.Linear(250, 1),
+        nn.Linear(100, 1),
     )
     return model
 
@@ -116,7 +116,9 @@ def encoder(classifier=None, final_activation="relu"):
             nn.ReLU(),
             nn.MaxPool2d(2),
             nn.Conv2d(2, 4, 3),
+            nn.ReLU(),
             nn.Flatten(),
+            nn.Linear(100, 10)
         )
     else:
         raise ValueError("Invalid argument for final_activation")
@@ -279,7 +281,7 @@ def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_l
             if len(x) != batch_size:
                 continue
 
-            for i in range(50):
+            for i in range(10):
                 D_solver.zero_grad()
                 real_data = x.view(-1, 1, 32, 32).to(device)
                 features = ENC(real_data)
