@@ -203,6 +203,40 @@ def get_optimizer(model, lr=1e-3, betas=(0.5, 0.999)):
     return optimizer
 
 
+def run_regularized_classifier(loader_train, G, G_solver, device, show_every=250,
+              batch_size=128, num_epochs=10, l=0.001):
+    """
+    Train simple fair classification GAN
+    """
+
+    iter_count = 0
+    for epoch in range(num_epochs):
+        for x, y, cf in loader_train:
+            if len(x) != batch_size:
+                continue
+
+            for i in range(10):
+                G_solver.zero_grad()
+                real_data = x.view(-1, 1, 32, 32).to(device)
+                preds = G(real_data).squeeze()
+
+                eo_yzero = torch.abs(F.relu(preds[(y == 0) & (cf >= 3)]).sum() - F.relu(preds[(y == 0) & (cf < 3)]).sum())
+                eo_yone = torch.abs(F.relu(preds[(y == 1) & (cf < 4)]).sum() - F.relu(preds[(y == 1) & (cf >= 4)]).sum())
+
+                g_error = (eo_yzero + eo_yone) * l + F.binary_cross_entropy_with_logits(preds, y)
+                g_error.backward()
+                G_solver.step()
+                # print(f"  g{i}: {g_error}")
+
+            if (iter_count % show_every == 0):
+                print('Iter: {}, G:{:.4}'.format(iter_count, g_error.item()))
+                print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
+                print()
+            iter_count += 1
+
+    return G
+
+
 def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, device, show_every=250,
               batch_size=128, num_epochs=10, l=0.001):
     """
