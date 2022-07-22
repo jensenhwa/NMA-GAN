@@ -189,7 +189,7 @@ def generator_loss(logits_fake):
     return loss
 
 
-def get_optimizer(model, lr=1e-3, betas=(0.5, 0.999)):
+def get_optimizer(model, lr=1e-4):
     """
     Construct and return optimizer
 
@@ -199,7 +199,7 @@ def get_optimizer(model, lr=1e-3, betas=(0.5, 0.999)):
     Returns:
     - An Adam optimizer for the model with the desired hyperparameters.
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=betas)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     return optimizer
 
 
@@ -304,12 +304,13 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
 
 
 def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_loss, device, show_every=250,
-              batch_size=128, num_epochs=10, l=1):
+              batch_size=128, num_epochs=10, l=1, acc_data=None):
     """
     Train simple fair classification GAN in v-space
     """
 
     iter_count = 0
+    accs = []
     for epoch in range(num_epochs):
         for x, y, cf in loader_train:
             if len(x) != batch_size:
@@ -322,7 +323,10 @@ def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_l
                 preds = FF(features).detach().squeeze()
 
                 z_tilde = y.unsqueeze(1)
-                v_prime = features.detach()[torch.randperm(features.size()[0])]
+                v_prime = features.detach().clone()
+                v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+                v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+#                 v_prime = features.detach()[torch.randperm(features.size()[0])]
                 s = cf.unsqueeze(1)  # sensitive atts
                 # print(v_prime)
                 # print(F.sigmoid(features))
@@ -352,7 +356,10 @@ def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_l
                 preds = FF(features).squeeze()
 
                 z_tilde = y.unsqueeze(1)
-                v_prime = features.detach()[torch.randperm(features.size()[0])]
+                v_prime = features.detach().clone()
+                v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+                v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+#                 v_prime = features.detach()[torch.randperm(features.size()[0])]
                 s = cf.unsqueeze(1)  # sensitive atts
 
                 logits_real2 = D2(torch.cat((s, v_prime, z_tilde), dim=1))
@@ -372,11 +379,22 @@ def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_l
             # print(v_prime)
             # print(features)
             # print(F.sigmoid(features))
+            with torch.no_grad():
+                if acc_data is not None:
+                    features = ENC(acc_data.x.view(-1, 1, 32, 32)).squeeze()
+                    y_preds = FF(features).squeeze()
+                    y_preds = (torch.sign(y_preds) + 1) / 2
+                    train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
+                    print("iter =", iter_count, ", acc =", train_acc)
+                    accs.append(train_acc)
+                    plt.close()
+                    plt.plot(range(iter_count+1), accs)
+                    plt.savefig("acc_per_iter.png")
 
-            if (iter_count % show_every == 0):
-                print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
-                print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
-                print()
+                if (iter_count % show_every == 0):
+                    print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
+                    print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
+                    print()
             iter_count += 1
 
     return D2, D3, ENC, FF
