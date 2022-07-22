@@ -1,0 +1,3 @@
+[submodule "diffae"]
+	path = diffae
+	url = git@github.com:phizaz/diffae.git
