@@ -1,68 +1,61 @@
-import glob
+from pathlib import Path
 
-import numpy as np
 import torch
-from PIL import Image
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
-from torchvision import transforms
 
-from stylegan2.model import Generator
-
-"""
-WIP
-"""
 
 class FaceData(Dataset):
-    def __init__(self, device, train=True):
-        img_names = glob.glob("GS_data/cropped/*.png")
-        img_names_sorted = sorted(img_names)
-        N = len(img_names_sorted)
+    """
+    GS-PPB face data for use with diffusion autoencoders
 
-        self.data = torch.empty((N, 3, 224, 224))
-        transform = transforms.Compose(
-            [
-                transforms.Resize(256),
-                transforms.CenterCrop(256),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ]
-        )
+    - self.x and self.x2 are the cond and xT tensors that make up the diffae's latent representation
+    - self.y is the gender (1 for female, 0 for male)
+    - self.cf is the skin color (1 for lightest, 6 for darkest)
+    """
 
-        imgs = []
+    def __init__(self, device, set):
 
-        for imgfile in img_names_sorted:
-            img = transform(Image.open(imgfile).convert("RGB"))
-            imgs.append(img)
+        self.cond = torch.load(Path(__file__).parent / "../diffae/cond_all.pt")
+        self.xT = torch.load(Path(__file__).parent / "../diffae/xT_all.pt")
+        N = self.xT.shape[0]
 
-        imgs = torch.stack(imgs, 0).to(device)
-
-        g_ema = Generator(256, 512, 8)
-        g_ema.load_state_dict(torch.load(args.ckpt)["g_ema"], strict=False)
-        g_ema.eval()
-        g_ema = g_ema.to(device)
-
-        self.y = torch.from_numpy(np.loadtxt('GS_data/gender.txt') > 0.5)
-        self.cf = torch.from_numpy(np.loadtxt('GS_data/skincolor.txt'))
+        self.y = torch.load(Path(__file__).parent / "../../GS_data/gender_diffae.pt")
+        self.cf = torch.load(Path(__file__).parent / "../../GS_data/skincolor_diffae.pt")
 
         if N != len(self.y) or N != len(self.cf):
             raise ValueError("Data of improper length")
 
-        X_train, X_test, y_train, y_test, cf_train, cf_test = train_test_split(self.data, self.y, self.cf,
-                                                                               stratify=self.y,
-                                                                               test_size=0.25)
+        X_train, X_test, X2_train, X2_test, y_train, y_test, cf_train, cf_test = train_test_split(self.cond, self.xT,
+                                                                                                  self.y, self.cf,
+                                                                                                  stratify=self.y,
+                                                                                                  test_size=0.20)
 
-        if train:
-            self.data = X_train.to(device=device)
+        X_train, X_val, X2_train, X2_val, y_train, y_val, cf_train, cf_val = train_test_split(X_train, X2_train,
+                                                                                              y_train, cf_train,
+                                                                                              stratify=y_train,
+                                                                                              test_size=0.20)
+
+        if set == "train":
+            self.x = X_train.to(device=device)
+            self.x2 = X2_train.to(device=device)
             self.y = y_train.to(device=device, dtype=torch.float)
             self.cf = cf_train.to(device=device, dtype=torch.int)
-        else:
-            self.data = X_test.to(device=device)
+        elif set == "val":
+            self.x = X_val.to(device=device)
+            self.x2 = X2_val.to(device=device)
+            self.y = y_val.to(device=device, dtype=torch.float)
+            self.cf = cf_val.to(device=device, dtype=torch.int)
+        elif set == "test":
+            self.x = X_test.to(device=device)
+            self.x2 = X2_test.to(device=device)
             self.y = y_test.to(device=device, dtype=torch.float)
             self.cf = cf_test.to(device=device, dtype=torch.int)
+        else:
+            raise NotImplementedError
 
     def __getitem__(self, index):
-        return self.data[index], self.y[index], self.cf[index]
+        return self.x[index], self.x2[index], self.y[index], self.cf[index]
 
     def __len__(self):
         return len(self.y)
