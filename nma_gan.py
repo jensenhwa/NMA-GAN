@@ -487,92 +487,121 @@ def run_real_gan(loader_train, D1, D2, D3, G, ENC, D_solver, G_solver, discrimin
     return G, ENC, D1, D2, D3
 
 
-def run_face_gan(loader_train, D1, D2, D3, G, D_solver, G_solver, discriminator_loss, generator_loss, device,
-                 save_filename, show_every=250,
-                 batch_size=128, noise_size=96, num_epochs=10, l=0.001):
+def sample_face_noise(model, batch_size, device):
+
+    T = 20
+    T_latent = 200
+    N = batch_size
+    sampler = model.conf._make_diffusion_conf(T).make_sampler()
+    latent_sampler = model.conf._make_latent_diffusion_conf(T_latent).make_sampler()
+    x_T = torch.randn(N,
+                      3,
+                      model.conf.img_size,
+                      model.conf.img_size,
+                      device=device)
+    latent_noise = torch.randn(len(x_T), model.conf.style_ch, device=device)
+
+    cond = latent_sampler.sample(
+        model=model.ema_model.latent_net,
+        noise=latent_noise,
+        clip_denoised=model.conf.latent_clip_sample,
+    )
+    cond = cond * model.conds_std.to(device) + model.conds_mean.to(device)
+    return cond
+
+
+def run_face_gan(loader_train, model, D2, D3, FF, D_solver, G_solver, discriminator_loss, show_every=250,
+                 batch_size=128, num_epochs=10, l=0.001, acc_data=None):
     """
     This does the same as run_real_gan but accepts features directly from loader_train, rather
     than using an independent encoder.
     """
     try:
         iter_count = 0
+        accs = []
         for epoch in range(num_epochs):
-            for features, y, cf in loader_train:
+            for features, _, y, cf in loader_train:
                 if len(features) != batch_size:
                     continue
 
                 for i in range(10):
                     D_solver.zero_grad()
-                    logits_real = D1(torch.cat((features, y.unsqueeze(1)), dim=1))
+                    preds = FF(features).detach().squeeze()
 
-                    g_fake_seed = sample_noise(batch_size, noise_size, dtype=features.dtype, device=features.device)
-                    fake_features_and_preds = G(g_fake_seed).detach()
-                    fake_features_and_preds += 1
-                    fake_features_and_preds /= 2
-                    logits_fake = D1(fake_features_and_preds)
+                    z_tilde = y.unsqueeze(1)
+                    v_prime = sample_face_noise(model, batch_size, features.device)
+                    s = cf.unsqueeze(1)  # sensitive atts
+                    # print(v_prime)
+                    # print(F.sigmoid(features))
+                    # if i == 9:
+                    #     assert False
 
-                    l1 = discriminator_loss(logits_real, logits_fake)
-                    preds = fake_features_and_preds[:, -1]
-
-                    z_tilde = y
-                    y_prime = torch.rand((len(features),), dtype=torch.float, device=device)
-                    s = cf  # sensitive atts
-
-                    logits_real2 = D2(torch.stack((s, y_prime, z_tilde), dim=1))
-                    logits_fake2 = D2(torch.stack((s, preds, z_tilde), dim=1))
+                    logits_real2 = D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                    logits_fake2 = D2(torch.cat((s, features, z_tilde), dim=1))
                     l2 = discriminator_loss(logits_real2, logits_fake2)
 
-                    logits_real3 = D3(torch.stack((y_prime, z_tilde), dim=1))
-                    logits_fake3 = D3(torch.stack((preds, z_tilde), dim=1))
+                    logits_real3 = D3(torch.cat((v_prime, z_tilde), dim=1))
+                    logits_fake3 = D3(torch.cat((features, z_tilde), dim=1))
                     l3 = discriminator_loss(logits_real3, logits_fake3)
 
-                    d_total_error = l1 + l2 + l3
+                    d_total_error = - F.binary_cross_entropy_with_logits(preds, y) + l2 + l3
+                    # print(- F.binary_cross_entropy_with_logits(preds, y))
+                    # print(l2)
+                    # print(l3)
                     d_total_error.backward()
                     D_solver.step()
                     # print(f"  d{i}: {d_total_error}")
 
                 for i in range(10):
                     G_solver.zero_grad()
-                    logits_real = D1(torch.cat((features, y.unsqueeze(1)), dim=1))
+                    preds = FF(features).squeeze()
+                    z_tilde = y.unsqueeze(1)
+                    v_prime = sample_face_noise(model, batch_size, features.device)
+                    s = cf.unsqueeze(1)
 
-                    g_fake_seed = sample_noise(batch_size, noise_size, dtype=features.dtype, device=features.device)
-                    fake_features_and_preds = (G(g_fake_seed) + 1) / 2
-                    logits_fake = D1(fake_features_and_preds)
-
-                    l1 = discriminator_loss(logits_real, logits_fake)
-                    preds = fake_features_and_preds[:, -1]
-
-                    z_tilde = y
-                    y_prime = torch.rand((len(features),), dtype=torch.float, device=device)
-                    s = cf  # sensitive atts
-
-                    logits_real2 = D2(torch.stack((s, y_prime, z_tilde), dim=1))
-                    logits_fake2 = D2(torch.stack((s, preds, z_tilde), dim=1))
+                    logits_real2 = D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                    logits_fake2 = D2(torch.cat((s, features, z_tilde), dim=1))
                     l2 = discriminator_loss(logits_real2, logits_fake2)
 
-                    logits_real3 = D3(torch.stack((y_prime, z_tilde), dim=1))
-                    logits_fake3 = D3(torch.stack((preds, z_tilde), dim=1))
+                    logits_real3 = D3(torch.cat((v_prime, z_tilde), dim=1))
+                    logits_fake3 = D3(torch.cat((features, z_tilde), dim=1))
                     l3 = discriminator_loss(logits_real3, logits_fake3)
 
                     l4 = (l2 - l3) ** 2
-                    g_error = l4 * l + l1
+                    g_error = l4 * l + F.binary_cross_entropy_with_logits(preds, y)
                     g_error.backward()
                     G_solver.step()
-                    # print(f"  g{i}: {g_error}")
 
-                if (iter_count % show_every == 0):
-                    print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
-                    # Need to compute classification accuracy, not generated images
-                    print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
-                    print()
+                # print(v_prime)
+                # print(features)
+                # print(F.sigmoid(features))
+                with torch.no_grad():
+                    if acc_data is not None:
+                        y_preds: torch.Tensor = FF(acc_data.x).squeeze()
+                        y_preds = (torch.sign(y_preds) + 1) / 2
+                        # TODO: print accuracies by skin class
+                        # Classes range from 1 to 6 inclusive (no 0)
+                        one_hot = torch.nn.functional.one_hot(acc_data.cf.long())[:, 1:].bool()
+
+                        train_accs = torch.sum(one_hot & (y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == acc_data.y.unsqueeze(1).expand(one_hot.shape) * one_hot), dim=0) / torch.sum(one_hot, dim=0)
+                        print(train_accs)
+                        train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
+                        print("iter =", iter_count, ", acc =", train_acc)
+                        accs.append(train_acc)
+                        plt.close()
+                        plt.plot(range(iter_count + 1), accs)
+                        plt.savefig("face_acc_per_iter.png")
+
+                    if (iter_count % show_every == 0):
+                        print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
+                        print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
+                        print()
                 iter_count += 1
-            # if epoch == num_epochs - 1:
-            #     show_images(imgs_numpy[0:16])
-            #     plt.savefig(os.path.join(GOOGLE_DRIVE_PATH, save_filename))
+
     except KeyboardInterrupt:
         print("Interrupted")
 
-    return G, D1, D2, D3
+    return D2, D3, FF
 
 
 def show_images(images):
