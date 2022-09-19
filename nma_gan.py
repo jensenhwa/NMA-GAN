@@ -1,12 +1,17 @@
 import math
+from multiprocessing import get_context
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.utils.data
 from matplotlib import pyplot as plt, gridspec
-from torch import nn
+from pytorch_lightning import LightningModule
+from torch import nn, distributed
+from torch.utils.data import DataLoader, DistributedSampler
 
+from diffae.choices import TrainMode
+from datasets.face_data import FaceData
 
 np.random.seed(0)
 NOISE_DIM = 96
@@ -510,6 +515,208 @@ def sample_face_noise(model, batch_size, device):
     return cond
 
 
+def ema(source, target, decay):
+    source_dict = source.state_dict()
+    target_dict = target.state_dict()
+    for key in source_dict.keys():
+        target_dict[key].data.copy_(target_dict[key].data * decay +
+                                    source_dict[key].data * (1 - decay))
+
+
+class FaceGAN(LightningModule):
+    def __init__(self, encoder, v_len: int, l: float, batch_size: int, **kwargs):
+        super().__init__()
+        self.l = l
+        assert batch_size % get_world_size() == 0
+        self.batch_size = batch_size // get_world_size()
+        self.D2 = discriminator2v(v_len=v_len)
+        self.D3 = discriminator3v(v_len=v_len)
+        self.encoder = encoder
+        self.FF = nn.Sequential(
+            nn.Linear(512, 1),
+        )
+
+    def setup(self, stage=None) -> None:
+        """
+        make datasets & seeding each worker separately
+        """
+        ##############################################
+        # NEED TO SET THE SEED SEPARATELY HERE
+        if self.encoder.conf.seed is not None:
+            seed = self.encoder.conf.seed * get_world_size() + self.global_rank
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed(seed)
+            print('local seed:', seed)
+        ##############################################
+
+        self.train_data = FaceData(set="train", device=self.device)
+        print('train data:', len(self.train_data))
+        self.val_data = FaceData(set="val", device=self.device)
+        print('val data:', len(self.val_data))
+        # self.test_data = FaceData(set="test", device=self.device)
+        # print('test data:', len(self.test_data))
+
+    def train_dataloader(self):
+        print('on train dataloader start ...')
+        sampler = DistributedSampler(self.train_data, shuffle=True, drop_last=True)
+        return DataLoader(self.train_data, batch_size=self.batch_size, sampler=sampler, shuffle=False,
+                          num_workers=2,
+                          pin_memory=True,
+                          drop_last=True,
+                          multiprocessing_context=get_context('fork'),)
+
+    def val_dataloader(self):
+        print('on val dataloader start ...')
+        sampler = DistributedSampler(self.val_data, shuffle=False, drop_last=False)
+        return DataLoader(self.val_data, batch_size=min(len(self.val_data) // get_world_size(), self.batch_size),
+                          sampler=sampler,
+                          shuffle=False,
+                          num_workers=2,
+                          pin_memory=True,
+                          drop_last=True,
+                          multiprocessing_context=get_context('fork'),)
+
+    # def test_dataloader(self):
+    #     print('on test dataloader start ...')
+    #     print(self.batch_size)
+    #     sampler = DistributedSampler(self.test_data, shuffle=False, drop_last=False)
+    #     return DataLoader(self.test_data, batch_size=min(len(self.test_data) // get_world_size(), self.batch_size),
+    #                       sampler=sampler,
+    #                       shuffle=False,
+    #                       num_workers=2,
+    #                       pin_memory=True,
+    #                       drop_last=True,
+    #                       multiprocessing_context=get_context('fork'), )
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        print("train step")
+        # for p in self.encoder.model.input_blocks[0][0].parameters():
+        #     print(p.requires_grad)
+        x, y, cf = batch
+
+        # train discriminator
+        if optimizer_idx == 0:
+            print("dis")
+            with torch.no_grad():
+                features = self.encoder.encode(x)
+                preds = self.FF(features).detach().squeeze()
+
+            z_tilde = y.unsqueeze(1)
+
+            v_prime = features.detach().clone()
+            v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+            v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+
+            s = cf.unsqueeze(1)  # sensitive atts
+
+            logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
+            logits_fake2 = self.D2(torch.cat((s, features, z_tilde), dim=1))
+            l2 = discriminator_loss(logits_real2, logits_fake2)
+
+            logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
+            logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
+            l3 = discriminator_loss(logits_real3, logits_fake3)
+
+            # Technically, BCE loss term is unnecessary here
+            loss = - F.binary_cross_entropy_with_logits(preds, y) + l2 + l3
+            print(loss)
+            self.log("d_loss", loss, prog_bar=True)
+            return loss
+
+        # train generator
+        if optimizer_idx == 1:
+            print("gen")
+            features = self.encoder.encode(x)
+            preds = self.FF(features).squeeze()
+            z_tilde = y.unsqueeze(1)
+
+            v_prime = features.detach().clone()
+            v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+            v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+
+            s = cf.unsqueeze(1)
+
+            logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
+            logits_fake2 = self.D2(torch.cat((s, features, z_tilde), dim=1))
+            l2 = discriminator_loss(logits_real2, logits_fake2)
+
+            logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
+            logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
+            l3 = discriminator_loss(logits_real3, logits_fake3)
+
+            l4 = (l2 - l3) ** 2
+
+            t, weight = self.encoder.T_sampler.sample(len(x), x.device)
+            losses = self.encoder.sampler.training_losses(model=self.encoder.model,
+                                                  x_start=x,
+                                                  t=t)
+            diffae_loss = losses['loss'].mean()
+            # divide by accum batches to make the accumulated gradient exact!
+            for key in ['loss', 'vae', 'latent', 'mmd', 'chamfer', 'arg_cnt']:
+                if key in losses:
+                    losses[key] = self.all_gather(losses[key]).mean()
+
+            if self.global_rank == 0:
+                self.logger.experiment.add_scalar('loss', losses['loss'],
+                                                  self.encoder.num_samples)
+                for key in ['vae', 'latent', 'mmd', 'chamfer', 'arg_cnt']:
+                    if key in losses:
+                        self.logger.experiment.add_scalar(
+                            f'loss/{key}', losses[key], self.encoder.num_samples)
+
+            loss = l4 * self.l + F.binary_cross_entropy_with_logits(preds, y) + diffae_loss
+            print(loss)
+            self.log("g_loss", loss, prog_bar=True)
+            return loss
+
+    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        if self.encoder.is_last_accum(batch_idx):
+            # only apply ema on the last gradient accumulation step,
+            # if it is the iteration that has optimizer.step()
+            if self.encoder.conf.train_mode == TrainMode.latent_diffusion:
+                # it trains only the latent hence change only the latent
+                ema(self.encoder.model.latent_net, self.encoder.ema_model.latent_net,
+                    self.encoder.conf.ema_decay)
+            else:
+                ema(self.encoder.model, self.encoder.ema_model, self.encoder.conf.ema_decay)
+
+    def on_before_optimizer_step(self, optimizer: torch.optim.Optimizer,
+                                 optimizer_idx: int) -> None:
+        self.encoder.on_before_optimizer_step(optimizer, optimizer_idx)
+
+    def validation_step(self, batch, batch_idx):
+        print("val step")
+        for p in self.encoder.model.input_blocks[0][0].parameters():
+            print(p.requires_grad)
+        x, y, cf = batch
+        features = self.encoder.encode(x)
+        y_preds = self.FF(features).squeeze()
+        y_preds = (torch.sign(y_preds) + 1) / 2
+        # Classes range from 1 to 6 inclusive (no 0)
+        one_hot = torch.nn.functional.one_hot(cf.long(), num_classes=7)[:, 1:].bool()
+        # accuracies by skin class
+        train_accs = torch.sum(one_hot & (
+                    y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == y.unsqueeze(1).expand(
+                one_hot.shape) * one_hot), dim=0) / torch.sum(one_hot, dim=0)
+        train_acc = (torch.sum(y_preds == y) / len(x)).item()
+        print(train_accs)
+        self.log("per_skin_acc", {str(i): x for i, x in enumerate(train_accs)})
+        self.log("acc", train_acc)
+
+    def configure_optimizers(self):
+        D_solver = get_optimizer(nn.ModuleList([self.D2, self.D3]))
+        G_solver = get_optimizer(nn.ModuleList([self.FF, self.encoder]))
+        return D_solver, G_solver
+
+
+def get_world_size():
+    if distributed.is_initialized():
+        return distributed.get_world_size()
+    else:
+        return 1
+
+
 def run_face_gan(loader_train, model, D2, D3, FF, D_solver, G_solver, discriminator_loss, show_every=250,
                  batch_size=128, num_epochs=10, l=0.001, acc_data=None):
     """
@@ -579,10 +786,9 @@ def run_face_gan(loader_train, model, D2, D3, FF, D_solver, G_solver, discrimina
                     if acc_data is not None:
                         y_preds: torch.Tensor = FF(acc_data.x).squeeze()
                         y_preds = (torch.sign(y_preds) + 1) / 2
-                        # TODO: print accuracies by skin class
                         # Classes range from 1 to 6 inclusive (no 0)
                         one_hot = torch.nn.functional.one_hot(acc_data.cf.long())[:, 1:].bool()
-
+                        # accuracies by skin class
                         train_accs = torch.sum(one_hot & (y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == acc_data.y.unsqueeze(1).expand(one_hot.shape) * one_hot), dim=0) / torch.sum(one_hot, dim=0)
                         print(train_accs)
                         train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
