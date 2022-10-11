@@ -13,23 +13,23 @@ from pytorch_lightning.strategies import DDPStrategy
 diffae_path = Path(".") / "diffae"
 sys.path.append(str(diffae_path.resolve()))
 from templates import LitModel
-from templates import ffhq256_autoenc
+from templates import ffhq128_autoenc_130M
 
 if __name__ == "__main__":
     np.random.seed(8)
-    conf = ffhq256_autoenc()
+    conf = ffhq128_autoenc_130M()
     conf.T_eval = 100
     conf.latent_T_eval = 100
     # from choices import TrainMode
     # conf.train_mode = TrainMode.diffusion
     conf.base_dir = "checkpoints_jh2"
-    # conf.pretrain.path = 'diffae/checkpoints/ffhq256_autoenc/last.ckpt'
-    # conf.latent_infer_path = 'diffae/checkpoints/ffhq256_autoenc/latent.pkl'
+    # conf.pretrain.path = 'diffae/checkpoints/ffhq128_autoenc/last.ckpt'
+    # conf.latent_infer_path = 'diffae/checkpoints/ffhq128_autoenc/latent.pkl'
     model = LitModel(conf)
     state = torch.load(f'diffae/checkpoints/{conf.name}/last.ckpt', map_location='cpu')
     print(model.load_state_dict(state['state_dict'], strict=False))
 
-    batch = 8
+    batch = 32
     gpus = [0, 1, 2, 3]
     nodes = 1
     gan = FaceGAN(model, 512, 10000, batch)

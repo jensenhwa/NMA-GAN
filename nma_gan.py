@@ -550,9 +550,9 @@ class FaceGAN(LightningModule):
             print('local seed:', seed)
         ##############################################
 
-        self.train_data = FaceData(set="train", device=self.device)
+        self.train_data = FaceData(set="train", device=self.device, dimension=128)
         print('train data:', len(self.train_data))
-        self.val_data = FaceData(set="val", device=self.device)
+        self.val_data = FaceData(set="val", device=self.device, dimension=128)
         print('val data:', len(self.val_data))
         # self.test_data = FaceData(set="test", device=self.device)
         # print('test data:', len(self.test_data))

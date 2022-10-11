@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from datasets.face_data import FaceDataForLatent
+from datasets.face_data import FaceDataForLatent128
 from nma_gan import FaceGAN
 from pytorch_lightning import Trainer
 from pytorch_lightning import loggers as pl_loggers
@@ -14,10 +14,10 @@ from pytorch_lightning.strategies import DDPStrategy
 diffae_path = Path(".") / "diffae"
 sys.path.append(str(diffae_path.resolve()))
 from templates import LitModel
-from templates_latent import ffhq256_autoenc, ffhq256_autoenc_latent
+from templates_latent import ffhq128_autoenc_130M, ffhq128_autoenc_latent
 
 def get_state_dict():
-    conf = ffhq256_autoenc()
+    conf = ffhq128_autoenc_130M()
     conf.T_eval = 100
     conf.latent_T_eval = 100
     # from choices import TrainMode
@@ -37,7 +37,7 @@ def get_state_dict():
 
 if __name__ == "__main__":
     np.random.seed(8)
-    conf = ffhq256_autoenc_latent()
+    conf = ffhq128_autoenc_latent()
     conf.T_eval = 100
     conf.latent_T_eval = 100
     # from choices import TrainMode
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     conf.latent_infer_path = 'diffae/checkpoints/ffhq256_autoenc/latent.pkl'
 
     def make_dataset(path=None, **kwargs):
-        return FaceDataForLatent()
+        return FaceDataForLatent128()
 
     conf.make_dataset = make_dataset
     model = LitModel(conf)
