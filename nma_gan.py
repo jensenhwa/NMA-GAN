@@ -590,17 +590,12 @@ class FaceGAN(LightningModule):
     #                       multiprocessing_context=get_context('fork'), )
 
     def training_step(self, batch, batch_idx, optimizer_idx):
-        print("train step")
-        # for p in self.encoder.model.input_blocks[0][0].parameters():
-        #     print(p.requires_grad)
         x, y, cf = batch
 
         # train discriminator
         if optimizer_idx == 0:
-            print("dis")
             with torch.no_grad():
                 features = self.encoder.encode(x)
-                preds = self.FF(features).detach().squeeze()
 
             z_tilde = y.unsqueeze(1)
 
@@ -618,17 +613,13 @@ class FaceGAN(LightningModule):
             logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
             l3 = discriminator_loss(logits_real3, logits_fake3)
 
-            # Technically, BCE loss term is unnecessary here
-            loss = - F.binary_cross_entropy_with_logits(preds, y) + l2 + l3
-            print(loss)
+            loss = l2 + l3
             self.log("d_loss", loss, prog_bar=True)
             return loss
 
         # train generator
         if optimizer_idx == 1:
-            print("gen")
             features = self.encoder.encode(x)
-            preds = self.FF(features).squeeze()
             z_tilde = y.unsqueeze(1)
 
             v_prime = features.detach().clone()
@@ -647,6 +638,7 @@ class FaceGAN(LightningModule):
 
             l4 = (l2 - l3) ** 2
 
+            # sample t's from a uniform distribution
             t, weight = self.encoder.T_sampler.sample(len(x), x.device)
             losses = self.encoder.sampler.training_losses(model=self.encoder.model,
                                                   x_start=x,
@@ -665,10 +657,15 @@ class FaceGAN(LightningModule):
                         self.logger.experiment.add_scalar(
                             f'loss/{key}', losses[key], self.encoder.num_samples)
 
-            loss = l4 * self.l + F.binary_cross_entropy_with_logits(preds, y) + diffae_loss
-            print(loss)
+            loss = l4 * self.l + diffae_loss
             self.log("g_loss", loss, prog_bar=True)
             return loss
+
+        # train feedforward to predict gender
+        if optimizer_idx == 2:
+            features = self.encoder.encode(x)
+            preds = self.FF(features).squeeze()
+            return F.binary_cross_entropy_with_logits(preds, y)
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
         if self.encoder.is_last_accum(batch_idx):
@@ -683,12 +680,10 @@ class FaceGAN(LightningModule):
 
     def on_before_optimizer_step(self, optimizer: torch.optim.Optimizer,
                                  optimizer_idx: int) -> None:
-        self.encoder.on_before_optimizer_step(optimizer, optimizer_idx)
+        if optimizer_idx == 1:
+            self.encoder.on_before_optimizer_step(optimizer, optimizer_idx)
 
     def validation_step(self, batch, batch_idx):
-        print("val step")
-        for p in self.encoder.model.input_blocks[0][0].parameters():
-            print(p.requires_grad)
         x, y, cf = batch
         features = self.encoder.encode(x)
         y_preds = self.FF(features).squeeze()
@@ -700,14 +695,14 @@ class FaceGAN(LightningModule):
                     y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == y.unsqueeze(1).expand(
                 one_hot.shape) * one_hot), dim=0) / torch.sum(one_hot, dim=0)
         train_acc = (torch.sum(y_preds == y) / len(x)).item()
-        print(train_accs)
         self.log("per_skin_acc", {str(i): x for i, x in enumerate(train_accs)})
         self.log("acc", train_acc)
 
     def configure_optimizers(self):
         D_solver = get_optimizer(nn.ModuleList([self.D2, self.D3]))
-        G_solver = get_optimizer(nn.ModuleList([self.FF, self.encoder]))
-        return D_solver, G_solver
+        G_solver = get_optimizer(nn.ModuleList([self.encoder]))
+        FF_solver = get_optimizer(nn.ModuleList([self.FF]))
+        return D_solver, G_solver, FF_solver
 
 
 def get_world_size():
