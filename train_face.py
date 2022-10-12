@@ -65,7 +65,7 @@ if __name__ == "__main__":
     print("training now")
     trainer = Trainer(
         max_epochs=300,
-    #     resume_from_checkpoint=resume,
+        resume_from_checkpoint=resume,
         gpus=gpus,
         num_nodes=nodes,
         accelerator="gpu",

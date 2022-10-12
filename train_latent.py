@@ -91,9 +91,9 @@ if __name__ == "__main__":
     print("training now")
     trainer = Trainer(
         max_steps=conf.total_samples // conf.batch_size_effective,
-    #     resume_from_checkpoint=resume,
+        resume_from_checkpoint=resume,
         gpus=gpus,
-    #     num_nodes=nodes,
+        num_nodes=nodes,
         accelerator="gpu",
         strategy=strategy,
         precision=16 if conf.fp16 else 32,

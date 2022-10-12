@@ -175,8 +175,8 @@ def discriminator_loss(logits_real, logits_fake):
     - loss: Tensor containing the scalar loss for the discriminator.
     """
     loss = 2 * F.binary_cross_entropy_with_logits(torch.cat((logits_real.squeeze(), logits_fake.squeeze())),
-                                                  torch.tensor([1] * logits_real.shape[0] + [0] * logits_real.shape[0],
-                                                               device=logits_real.device, dtype=torch.float))
+                                                  torch.cat((torch.ones(logits_real.shape[0], device=logits_real.device),
+                                                             torch.zeros(logits_fake.shape[0], device=logits_fake.device))))
     return loss
 
 
@@ -663,9 +663,12 @@ class FaceGAN(LightningModule):
 
         # train feedforward to predict gender
         if optimizer_idx == 2:
-            features = self.encoder.encode(x)
+            with torch.no_grad():
+                features = self.encoder.encode(x)
             preds = self.FF(features).squeeze()
-            return F.binary_cross_entropy_with_logits(preds, y)
+            loss = F.binary_cross_entropy_with_logits(preds, y)
+            self.log("ff_loss", loss)
+            return loss
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
         if self.encoder.is_last_accum(batch_idx):
@@ -695,8 +698,8 @@ class FaceGAN(LightningModule):
                     y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == y.unsqueeze(1).expand(
                 one_hot.shape) * one_hot), dim=0) / torch.sum(one_hot, dim=0)
         train_acc = (torch.sum(y_preds == y) / len(x)).item()
-        self.log("per_skin_acc", {str(i): x for i, x in enumerate(train_accs)})
-        self.log("acc", train_acc)
+        self.log("per_skin_acc", {str(i): x for i, x in enumerate(train_accs)}, sync_dist=True)
+        self.log("acc", train_acc, sync_dist=True)
 
     def configure_optimizers(self):
         D_solver = get_optimizer(nn.ModuleList([self.D2, self.D3]))
