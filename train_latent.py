@@ -22,7 +22,7 @@ def get_state_dict():
     conf.latent_T_eval = 100
     # from choices import TrainMode
     # conf.train_mode = TrainMode.diffusion
-    conf.base_dir = "checkpoints_jh2"
+    conf.base_dir = "checkpoints_jh2"  # TODO: replace with desired input model directory
     # conf.pretrain.path = 'diffae/checkpoints/ffhq256_autoenc/last.ckpt'
     # conf.latent_infer_path = 'diffae/checkpoints/ffhq256_autoenc/latent.pkl'
     model = LitModel(conf)
@@ -30,7 +30,7 @@ def get_state_dict():
     from nma_gan import FaceGAN
     gan = FaceGAN(model, 512, 10000, 64)
 
-    state = torch.load(f'checkpoints_jh2/{conf.name}/last.ckpt', map_location='cpu')
+    state = torch.load(f'checkpoints_jh2/{conf.name}/last.ckpt', map_location='cpu')  # TODO: replace with desired input model directory
     print(gan.load_state_dict(state['state_dict'], strict=False))
     return gan.encoder.state_dict()
 
@@ -42,10 +42,10 @@ if __name__ == "__main__":
     conf.latent_T_eval = 100
     # from choices import TrainMode
     # conf.train_mode = TrainMode.diffusion
-    conf.base_dir = "checkpoints_jh3"
+    conf.base_dir = "checkpoints_jh3"  # TODO: replace with desired output directory
     conf.pretrain = None
     # junk (just to properly set conds_mean and std as buffers)
-    conf.latent_infer_path = 'diffae/checkpoints/ffhq256_autoenc/latent.pkl'
+    conf.latent_infer_path = 'diffae/checkpoints/ffhq128_autoenc_130M/latent.pkl'
 
     def make_dataset(path=None, **kwargs):
         return FaceDataForLatent128()

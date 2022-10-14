@@ -667,7 +667,7 @@ class FaceGAN(LightningModule):
                 features = self.encoder.encode(x)
             preds = self.FF(features).squeeze()
             loss = F.binary_cross_entropy_with_logits(preds, y)
-            self.log("ff_loss", loss)
+            self.log("ff_loss", loss, prog_bar=True)
             return loss
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:

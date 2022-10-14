@@ -22,7 +22,7 @@ if __name__ == "__main__":
     conf.latent_T_eval = 100
     # from choices import TrainMode
     # conf.train_mode = TrainMode.diffusion
-    conf.base_dir = "checkpoints_jh2"
+    conf.base_dir = "checkpoints_jh2"  # TODO: replace with desired output directory
     # conf.pretrain.path = 'diffae/checkpoints/ffhq128_autoenc/last.ckpt'
     # conf.latent_infer_path = 'diffae/checkpoints/ffhq128_autoenc/latent.pkl'
     model = LitModel(conf)
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     batch = 32
     gpus = [0, 1, 2, 3]
     nodes = 1
-    gan = FaceGAN(model, 512, 10000, batch)
+    gan = FaceGAN(model, 512, 10000, batch)  # TODO: replace with desired hyperparameters
 
     if not os.path.exists(conf.logdir):
         os.makedirs(conf.logdir)
@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     print("training now")
     trainer = Trainer(
-        max_epochs=300,
+        max_epochs=1000,
         resume_from_checkpoint=resume,
         gpus=gpus,
         num_nodes=nodes,
