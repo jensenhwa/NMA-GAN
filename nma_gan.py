@@ -595,7 +595,7 @@ class FaceGAN(LightningModule):
         # train discriminator
         if optimizer_idx == 0:
             with torch.no_grad():
-                features = self.encoder.encode(x)
+                features = self.encoder.model.encoder.forward(x)
 
             z_tilde = y.unsqueeze(1)
 
@@ -619,7 +619,7 @@ class FaceGAN(LightningModule):
 
         # train generator
         if optimizer_idx == 1:
-            features = self.encoder.encode(x)
+            features = self.encoder.model.encoder.forward(x)
             z_tilde = y.unsqueeze(1)
 
             v_prime = features.detach().clone()
@@ -664,7 +664,7 @@ class FaceGAN(LightningModule):
         # train feedforward to predict gender
         if optimizer_idx == 2:
             with torch.no_grad():
-                features = self.encoder.encode(x)
+                features = self.encoder.model.encoder.forward(x)
             preds = self.FF(features).squeeze()
             loss = F.binary_cross_entropy_with_logits(preds, y)
             self.log("ff_loss", loss, prog_bar=True)
