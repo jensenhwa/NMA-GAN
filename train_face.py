@@ -32,7 +32,7 @@ if __name__ == "__main__":
     batch = 32
     gpus = [0, 1, 2, 3]
     nodes = 1
-    gan = FaceGAN(model, 512, 10000, batch)  # TODO: replace with desired hyperparameters
+    gan = FaceGAN(model, 512, 0.1, 1, batch)  # TODO: replace with desired hyperparameters
 
     if not os.path.exists(conf.logdir):
         os.makedirs(conf.logdir)

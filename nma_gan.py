@@ -524,9 +524,10 @@ def ema(source, target, decay):
 
 
 class FaceGAN(LightningModule):
-    def __init__(self, encoder, v_len: int, l: float, batch_size: int, **kwargs):
+    def __init__(self, encoder, v_len: int, l: float, g: float, batch_size: int, **kwargs):
         super().__init__()
         self.l = l
+        self.g = g
         assert batch_size % get_world_size() == 0
         self.batch_size = batch_size // get_world_size()
         self.D2 = discriminator2v(v_len=v_len)
@@ -620,6 +621,7 @@ class FaceGAN(LightningModule):
         # train generator
         if optimizer_idx == 1:
             features = self.encoder.model.encoder.forward(x)
+            preds = self.FF(features).squeeze()
             z_tilde = y.unsqueeze(1)
 
             v_prime = features.detach().clone()
@@ -636,7 +638,7 @@ class FaceGAN(LightningModule):
             logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
             l3 = discriminator_loss(logits_real3, logits_fake3)
 
-            l4 = (l2 - l3) ** 2
+            ci_loss = (l2 - l3) ** 2
 
             # sample t's from a uniform distribution
             t, weight = self.encoder.T_sampler.sample(len(x), x.device)
@@ -657,17 +659,14 @@ class FaceGAN(LightningModule):
                         self.logger.experiment.add_scalar(
                             f'loss/{key}', losses[key], self.encoder.num_samples)
 
-            loss = l4 * self.l + diffae_loss
-            self.log("g_loss", loss, prog_bar=True)
-            return loss
+            gender_loss = F.binary_cross_entropy_with_logits(preds, y)
+            loss = diffae_loss + self.l * ci_loss + self.g * gender_loss
 
-        # train feedforward to predict gender
-        if optimizer_idx == 2:
-            with torch.no_grad():
-                features = self.encoder.model.encoder.forward(x)
-            preds = self.FF(features).squeeze()
-            loss = F.binary_cross_entropy_with_logits(preds, y)
-            self.log("ff_loss", loss, prog_bar=True)
+            self.log("new_g_loss", loss, prog_bar=True)
+
+            # To maintain compatibility with previous models
+            self.log("g_loss", diffae_loss + self.l * ci_loss)
+            self.log("ff_loss", gender_loss)
             return loss
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
@@ -703,9 +702,8 @@ class FaceGAN(LightningModule):
 
     def configure_optimizers(self):
         D_solver = get_optimizer(nn.ModuleList([self.D2, self.D3]))
-        G_solver = get_optimizer(nn.ModuleList([self.encoder]))
-        FF_solver = get_optimizer(nn.ModuleList([self.FF]))
-        return D_solver, G_solver, FF_solver
+        G_solver = get_optimizer(nn.ModuleList([self.encoder, self.FF]))
+        return D_solver, G_solver
 
 
 def get_world_size():
