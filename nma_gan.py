@@ -11,7 +11,7 @@ from torch import nn, distributed
 from torch.utils.data import DataLoader, DistributedSampler
 
 from diffae.choices import TrainMode
-from datasets.face_data import FaceData
+from datasets.horse_data import HorseData
 
 np.random.seed(0)
 NOISE_DIM = 96
@@ -523,7 +523,7 @@ def ema(source, target, decay):
                                     source_dict[key].data * (1 - decay))
 
 
-class FaceGAN(LightningModule):
+class HorseGAN(LightningModule):
     def __init__(self, encoder, v_len: int, l: float, batch_size: int, **kwargs):
         super().__init__()
         self.l = l
@@ -549,10 +549,10 @@ class FaceGAN(LightningModule):
             torch.cuda.manual_seed(seed)
             print('local seed:', seed)
         ##############################################
-
-        self.train_data = FaceData(set="train", device=self.device, dimension=128)
+        print("Device self",self.device)
+        self.train_data = HorseData(set="train", device=self.device, dimension=128)
         print('train data:', len(self.train_data))
-        self.val_data = FaceData(set="val", device=self.device, dimension=128)
+        self.val_data = HorseData(set="val", device=self.device, dimension=128)
         print('val data:', len(self.val_data))
         # self.test_data = FaceData(set="test", device=self.device)
         # print('test data:', len(self.test_data))
@@ -692,7 +692,7 @@ class FaceGAN(LightningModule):
         y_preds = self.FF(features).squeeze()
         y_preds = (torch.sign(y_preds) + 1) / 2
         # Classes range from 1 to 6 inclusive (no 0)
-        one_hot = torch.nn.functional.one_hot(cf.long(), num_classes=7)[:, 1:].bool()
+        one_hot = torch.nn.functional.one_hot(cf.long(), num_classes=2)[:, 1:].bool()
         # accuracies by skin class
         train_accs = torch.sum(one_hot & (
                     y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == y.unsqueeze(1).expand(
