@@ -1,4 +1,5 @@
 import math
+import pickle
 from multiprocessing import get_context
 
 import numpy as np
@@ -12,6 +13,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 
 from diffae.choices import TrainMode
 from datasets.face_data import FaceData
+from synthetic_experiments import get_dcorr
 
 np.random.seed(0)
 NOISE_DIM = 96
@@ -209,12 +211,14 @@ def get_optimizer(model, lr=1e-4):
 
 
 def run_regularized_classifier(loader_train, G, G_solver, device, show_every=250,
-              batch_size=128, num_epochs=10, l=0.001):
+              batch_size=128, num_epochs=10, l=0.001, acc_data=None, name="reg_temp"):
     """
     Train simple fair classification GAN
     """
 
     iter_count = 0
+    accs = []
+    dcors = []
     for epoch in range(num_epochs):
         for x, y, cf in loader_train:
             if len(x) != batch_size:
@@ -233,22 +237,44 @@ def run_regularized_classifier(loader_train, G, G_solver, device, show_every=250
                 G_solver.step()
                 # print(f"  g{i}: {g_error}")
 
+            with torch.no_grad():
+                if acc_data is not None:
+                    y_preds_logits = G(acc_data.x.view(-1, 1, 32, 32)).squeeze()
+                    y_preds = (torch.sign(y_preds_logits) + 1) / 2
+                    train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
+                    dcorr = (get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])
+                             + get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])) / 2
+                    accs.append(train_acc)
+                    dcors.append(dcorr)
+                    plt.close()
+                    plt.plot(range(iter_count+1), accs)
+                    plt.plot(range(iter_count+1), dcors)
+
             if (iter_count % show_every == 0):
+                if acc_data is not None:
+                    print("iter =", iter_count, ", acc =", train_acc, ", dcorr =", dcorr)
                 print('Iter: {}, G:{:.4}'.format(iter_count, g_error.item()))
                 print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
                 print()
+                plt.show()
             iter_count += 1
 
+    with open(f"{name}_dcors.pkl", "wb") as fp:
+        pickle.dump(dcors, fp)
+    with open(f"{name}_accs.pkl", "wb") as fp:
+        pickle.dump(accs, fp)
     return G
 
 
 def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, device, show_every=250,
-              batch_size=128, num_epochs=10, l=0.001):
+              batch_size=128, num_epochs=10, l=0.001, acc_data=None, name="y_temp"):
     """
     Train simple fair classification GAN
     """
 
     iter_count = 0
+    accs = []
+    dcors = []
     for epoch in range(num_epochs):
         for x, y, cf in loader_train:
             if len(x) != batch_size:
@@ -260,7 +286,8 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
                 preds = G(real_data).detach().squeeze()
 
                 z_tilde = y
-                y_prime = torch.rand((len(x),))
+                y_prime = torch.rand((len(x),)) * 0.5
+                y_prime[y == 1] = y_prime[y == 1] + 0.5
                 s = cf  # sensitive atts
 
                 logits_real2 = D2(torch.stack((s, y_prime, z_tilde), dim=1))
@@ -299,23 +326,46 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
                 G_solver.step()
                 # print(f"  g{i}: {g_error}")
 
-            if (iter_count % show_every == 0):
-                print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
-                print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
-                print()
+
+            with torch.no_grad():
+                if acc_data is not None:
+                    y_preds_logits = G(acc_data.x.view(-1, 1, 32, 32)).squeeze()
+                    y_preds = (torch.sign(y_preds_logits) + 1) / 2
+                    train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
+                    dcorr = (get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])
+                             + get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])) / 2
+                    accs.append(train_acc)
+                    dcors.append(dcorr)
+                    plt.close()
+                    plt.plot(range(iter_count+1), accs)
+                    plt.plot(range(iter_count+1), dcors)
+                    # plt.savefig("acc_per_iter.png")
+
+                if (iter_count % show_every == 0):
+                    if acc_data is not None:
+                        print("iter =", iter_count, ", acc =", train_acc, ", dcorr =", dcorr)
+                    print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
+                    print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
+                    print()
+                    plt.show()
             iter_count += 1
 
+    with open(f"{name}_dcors.pkl", "wb") as fp:
+        pickle.dump(dcors, fp)
+    with open(f"{name}_accs.pkl", "wb") as fp:
+        pickle.dump(accs, fp)
     return G, D2, D3
 
 
 def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_loss, device, show_every=250,
-              batch_size=128, num_epochs=10, l=1, acc_data=None):
+              batch_size=128, num_epochs=10, l=1, acc_data=None, name="temp"):
     """
     Train simple fair classification GAN in v-space
     """
 
     iter_count = 0
     accs = []
+    dcors = []
     for epoch in range(num_epochs):
         for x, y, cf in loader_train:
             if len(x) != batch_size:
@@ -387,21 +437,33 @@ def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_l
             with torch.no_grad():
                 if acc_data is not None:
                     features = ENC(acc_data.x.view(-1, 1, 32, 32)).squeeze()
-                    y_preds = FF(features).squeeze()
-                    y_preds = (torch.sign(y_preds) + 1) / 2
+                    y_preds_logits = FF(features).squeeze()
+                    y_preds = (torch.sign(y_preds_logits) + 1) / 2
                     train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
-                    print("iter =", iter_count, ", acc =", train_acc)
+                    dcorr = (get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])
+                             + get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])) / 2
                     accs.append(train_acc)
+                    dcors.append(dcorr)
+
                     plt.close()
                     plt.plot(range(iter_count+1), accs)
-                    plt.savefig("acc_per_iter.png")
+                    plt.plot(range(iter_count+1), dcors)
+
+                    # plt.savefig("acc_per_iter.png")
 
                 if (iter_count % show_every == 0):
+                    if acc_data is not None:
+                        print("iter =", iter_count, ", acc =", train_acc, ", dcorr =", dcorr)
                     print('Iter: {}, D: {:.4}, G:{:.4}'.format(iter_count, d_total_error.item(), g_error.item()))
                     print("loss: ", F.binary_cross_entropy_with_logits(preds, y).item())
                     print()
+                    plt.show()
             iter_count += 1
 
+    with open(f"{name}_dcors.pkl", "wb") as fp:
+        pickle.dump(dcors, fp)
+    with open(f"{name}_accs.pkl", "wb") as fp:
+        pickle.dump(accs, fp)
     return D2, D3, ENC, FF
 
 
@@ -475,6 +537,13 @@ def run_real_gan(loader_train, D1, D2, D3, G, ENC, D_solver, G_solver, discrimin
                     l3 = discriminator_loss(logits_real3, logits_fake3)
 
                     l4 = (l2 - l3) ** 2
+
+                    eo_yzero = torch.abs(
+                        F.relu(preds[(y == 0) & (cf >= 3)]).sum() - F.relu(preds[(y == 0) & (cf < 3)]).sum())
+                    eo_yone = torch.abs(
+                        F.relu(preds[(y == 1) & (cf < 4)]).sum() - F.relu(preds[(y == 1) & (cf >= 4)]).sum())
+
+                    g_error = (eo_yzero + eo_yone) * l + F.binary_cross_entropy_with_logits(preds, y)
                     g_error = l4 * l + l1
                     g_error.backward()
                     G_solver.step()
