@@ -28,7 +28,7 @@ def get_state_dict():
     model = LitModel(conf)
 
     from nma_gan import FaceGAN
-    gan = FaceGAN(model, 512, 10000, 64)
+    gan = FaceGAN(model, 512, 10000, 1, 64)
 
     state = torch.load(f'checkpoints_jh2/{conf.name}/last.ckpt', map_location='cpu')  # TODO: replace with desired input model directory
     print(gan.load_state_dict(state['state_dict'], strict=False))
