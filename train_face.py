@@ -15,6 +15,7 @@ sys.path.append(str(diffae_path.resolve()))
 from templates import LitModel
 from templates import ffhq128_autoenc_130M
 
+# train_face.py <dir> <l> <g>
 if __name__ == "__main__":
     np.random.seed(8)
     conf = ffhq128_autoenc_130M()
@@ -22,7 +23,7 @@ if __name__ == "__main__":
     conf.latent_T_eval = 100
     # from choices import TrainMode
     # conf.train_mode = TrainMode.diffusion
-    conf.base_dir = "checkpoints_jh2"  # TODO: replace with desired output directory
+    conf.base_dir = sys.argv[1]  # "checkpoints_jh2"  # TODO: replace with desired output directory
     # conf.pretrain.path = 'diffae/checkpoints/ffhq128_autoenc/last.ckpt'
     # conf.latent_infer_path = 'diffae/checkpoints/ffhq128_autoenc/latent.pkl'
     model = LitModel(conf)
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     batch = 32
     gpus = [0, 1, 2, 3]
     nodes = 1
-    gan = FaceGAN(model, 512, 0.1, 1, batch)  # TODO: replace with desired hyperparameters
+    gan = FaceGAN(model, 512, sys.argv[2], sys.argv[3], batch)  # TODO: replace with desired hyperparameters
 
     if not os.path.exists(conf.logdir):
         os.makedirs(conf.logdir)
