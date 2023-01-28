@@ -593,12 +593,13 @@ def ema(source, target, decay):
 
 
 class FaceGAN(LightningModule):
-    def __init__(self, encoder, v_len: int, l: float, g: float, batch_size: int, **kwargs):
+    def __init__(self, encoder, v_len: int, l: float, g: float, batch_size: int, cv_fold=None, **kwargs):
         super().__init__()
         self.l = l
         self.g = g
         assert batch_size % get_world_size() == 0
         self.batch_size = batch_size // get_world_size()
+        self.cv_fold = cv_fold
         self.D2 = discriminator2v(v_len=v_len)
         self.D3 = discriminator3v(v_len=v_len)
         self.encoder = encoder
@@ -620,9 +621,9 @@ class FaceGAN(LightningModule):
             print('local seed:', seed)
         ##############################################
 
-        self.train_data = FaceData(set="train", device=self.device, dimension=128)
+        self.train_data = FaceData(set="train", device=self.device, dimension=128, cv_fold=self.cv_fold)
         print('train data:', len(self.train_data))
-        self.val_data = FaceData(set="val", device=self.device, dimension=128)
+        self.val_data = FaceData(set="val", device=self.device, dimension=128, cv_fold=self.cv_fold)
         print('val data:', len(self.val_data))
         # self.test_data = FaceData(set="test", device=self.device)
         # print('test data:', len(self.test_data))

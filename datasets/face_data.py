@@ -14,7 +14,7 @@ class FaceData(Dataset):
     - self.cf is the skin color (1 for lightest, 6 for darkest)
     """
 
-    def __init__(self, set, device, dimension):
+    def __init__(self, set, device, dimension, cv_fold=None):
         # self.images = torch.load(Path(__file__).parent / "../diffae/images.pt")
         #
         # # self.cond = torch.load(Path(__file__).parent / "../diffae/cond_all.pt")
@@ -36,13 +36,19 @@ class FaceData(Dataset):
         #                                                                     test_size=0.20)
 
         if set == "train":
-            self.x = torch.load(Path(__file__).parent / "face/X_train.pt", map_location=device)
-            self.y = torch.load(Path(__file__).parent / "face/y_train.pt", map_location=device)
-            self.cf = torch.load(Path(__file__).parent / "face/cf_train.pt", map_location=device)
+            self.x = torch.load(Path(__file__).parent / f"face/X_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+                                map_location=device)
+            self.y = torch.load(Path(__file__).parent / f"face/y_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+                                map_location=device)
+            self.cf = torch.load(Path(__file__).parent / f"face/cf_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+                                 map_location=device)
         elif set == "val":
-            self.x = torch.load(Path(__file__).parent / "face/X_val.pt", map_location=device)
-            self.y = torch.load(Path(__file__).parent / "face/y_val.pt", map_location=device)
-            self.cf = torch.load(Path(__file__).parent / "face/cf_val.pt", map_location=device)
+            self.x = torch.load(Path(__file__).parent / f"face/X_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+                                map_location=device)
+            self.y = torch.load(Path(__file__).parent / f"face/y_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+                                map_location=device)
+            self.cf = torch.load(Path(__file__).parent / f"face/cf_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+                                 map_location=device)
         elif set == "test":
             self.x = torch.load(Path(__file__).parent / "face/X_test.pt", map_location=device)
             self.y = torch.load(Path(__file__).parent / "face/y_test.pt", map_location=device)
