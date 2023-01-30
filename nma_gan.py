@@ -243,7 +243,7 @@ def run_regularized_classifier(loader_train, G, G_solver, device, show_every=250
                     y_preds = (torch.sign(y_preds_logits) + 1) / 2
                     train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
                     dcorr = (get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])
-                             + get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])) / 2
+                             + get_dcorr(y_preds_logits[acc_data.y == 1], acc_data.cf[acc_data.y == 1])) / 2
                     accs.append(train_acc)
                     dcors.append(dcorr)
                     plt.close()
@@ -286,7 +286,7 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
                 preds = G(real_data).detach().squeeze()
 
                 z_tilde = y
-                y_prime = torch.rand((len(x),)) * 0.5
+                y_prime = torch.rand((len(x),), device=device) * 0.5
                 y_prime[y == 1] = y_prime[y == 1] + 0.5
                 s = cf  # sensitive atts
 
@@ -309,7 +309,7 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
                 preds = G(real_data).squeeze()
 
                 z_tilde = y
-                y_prime = torch.rand((len(x),))
+                y_prime = torch.rand((len(x),), device=device)
                 s = cf  # sensitive atts
 
                 logits_real2 = D2(torch.stack((s, y_prime, z_tilde), dim=1))
@@ -333,7 +333,7 @@ def run_a_gan(loader_train, D2, D3, G, D_solver, G_solver, discriminator_loss, d
                     y_preds = (torch.sign(y_preds_logits) + 1) / 2
                     train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
                     dcorr = (get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])
-                             + get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])) / 2
+                             + get_dcorr(y_preds_logits[acc_data.y == 1], acc_data.cf[acc_data.y == 1])) / 2
                     accs.append(train_acc)
                     dcors.append(dcorr)
                     plt.close()
@@ -441,7 +441,7 @@ def run_v_gan(loader_train, D2, D3, ENC, FF, D_solver, G_solver, discriminator_l
                     y_preds = (torch.sign(y_preds_logits) + 1) / 2
                     train_acc = (torch.sum(y_preds == acc_data.y) / len(acc_data)).item()
                     dcorr = (get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])
-                             + get_dcorr(y_preds_logits[acc_data.y == 0], acc_data.cf[acc_data.y == 0])) / 2
+                             + get_dcorr(y_preds_logits[acc_data.y == 1], acc_data.cf[acc_data.y == 1])) / 2
                     accs.append(train_acc)
                     dcors.append(dcorr)
 
@@ -671,8 +671,10 @@ class FaceGAN(LightningModule):
             z_tilde = y.unsqueeze(1)
 
             v_prime = features.detach().clone()
-            v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-            v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+            if v_prime[y == 0].size()[0] > 0:
+                v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+            if v_prime[y == 1].size()[0] > 0:
+                v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
 
             s = cf.unsqueeze(1)  # sensitive atts
 
@@ -695,8 +697,10 @@ class FaceGAN(LightningModule):
             z_tilde = y.unsqueeze(1)
 
             v_prime = features.detach().clone()
-            v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-            v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+            if v_prime[y == 0].size()[0] > 0:
+                v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+            if v_prime[y == 1].size()[0] > 0:
+                v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
 
             s = cf.unsqueeze(1)
 
