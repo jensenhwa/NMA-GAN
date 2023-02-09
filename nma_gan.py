@@ -600,8 +600,14 @@ class FaceGAN(LightningModule):
         assert batch_size % get_world_size() == 0
         self.batch_size = batch_size // get_world_size()
         self.cv_fold = cv_fold
-        self.D2 = discriminator2v(v_len=v_len)
-        self.D3 = discriminator3v(v_len=v_len)
+        if v_len < 1:
+            self.mode = 'y'
+            self.D2 = discriminator2()
+            self.D3 = discriminator3()
+        else:
+            self.mode = 'v'
+            self.D2 = discriminator2v(v_len=v_len)
+            self.D3 = discriminator3v(v_len=v_len)
         self.encoder = encoder
         self.FF = nn.Sequential(
             nn.Linear(512, 1),
@@ -667,23 +673,43 @@ class FaceGAN(LightningModule):
         if optimizer_idx == 0:
             with torch.no_grad():
                 features = self.encoder.model.encoder.forward(x)
+                preds = self.FF(features).squeeze()
 
-            z_tilde = y.unsqueeze(1)
+            if self.mode == 'y':
+                z_tilde = y
 
-            v_prime = features.detach().clone()
-            if v_prime[y == 0].size()[0] > 0:
-                v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-            if v_prime[y == 1].size()[0] > 0:
-                v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+                y_prime = torch.rand((len(x),), device=x.device) * 0.5
+                y_prime[y == 1] = y_prime[y == 1] + 0.5
 
-            s = cf.unsqueeze(1)  # sensitive atts
+                s = cf  # sensitive atts
 
-            logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
-            logits_fake2 = self.D2(torch.cat((s, features, z_tilde), dim=1))
+                logits_real2 = self.D2(torch.stack((s, y_prime, z_tilde), dim=1))
+                logits_fake2 = self.D2(torch.stack((s, F.sigmoid(preds), z_tilde), dim=1))
+
+                logits_real3 = self.D3(torch.stack((y_prime, z_tilde), dim=1))
+                logits_fake3 = self.D3(torch.stack((F.sigmoid(preds), z_tilde), dim=1))
+
+            elif self.mode == 'v':
+                z_tilde = y.unsqueeze(1)
+
+                v_prime = features.detach().clone()
+                if v_prime[y == 0].size()[0] > 0:
+                    v_prime[y == 0] = v_prime[y == 0][
+                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+                if v_prime[y == 1].size()[0] > 0:
+                    v_prime[y == 1] = v_prime[y == 1][
+                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+
+                s = cf.unsqueeze(1)  # sensitive atts
+
+                logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                logits_fake2 = self.D2(torch.cat((s, features, z_tilde), dim=1))
+
+                logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
+                logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
+            else:
+                raise ValueError("Unsupported mode")
             l2 = discriminator_loss(logits_real2, logits_fake2)
-
-            logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
-            logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
             l3 = discriminator_loss(logits_real3, logits_fake3)
 
             loss = l2 + l3
@@ -694,22 +720,40 @@ class FaceGAN(LightningModule):
         if optimizer_idx == 1:
             features = self.encoder.model.encoder.forward(x)
             preds = self.FF(features).squeeze()
-            z_tilde = y.unsqueeze(1)
 
-            v_prime = features.detach().clone()
-            if v_prime[y == 0].size()[0] > 0:
-                v_prime[y == 0] = v_prime[y == 0][torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-            if v_prime[y == 1].size()[0] > 0:
-                v_prime[y == 1] = v_prime[y == 1][torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+            if self.mode == 'y':
+                z_tilde = y
 
-            s = cf.unsqueeze(1)
+                y_prime = torch.rand((len(x),), device=x.device) * 0.5
+                y_prime[y == 1] = y_prime[y == 1] + 0.5
 
-            logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
-            logits_fake2 = self.D2(torch.cat((s, features, z_tilde), dim=1))
+                s = cf
+
+                logits_real2 = self.D2(torch.stack((s, y_prime, z_tilde), dim=1))
+                logits_fake2 = self.D2(torch.stack((s, F.sigmoid(preds), z_tilde), dim=1))
+                logits_real3 = self.D3(torch.stack((y_prime, z_tilde), dim=1))
+                logits_fake3 = self.D3(torch.stack((F.sigmoid(preds), z_tilde), dim=1))
+            elif self.mode == 'v':
+                z_tilde = y.unsqueeze(1)
+
+                v_prime = features.detach().clone()
+                if v_prime[y == 0].size()[0] > 0:
+                    v_prime[y == 0] = v_prime[y == 0][
+                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+                if v_prime[y == 1].size()[0] > 0:
+                    v_prime[y == 1] = v_prime[y == 1][
+                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+
+                s = cf.unsqueeze(1)
+
+                logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                logits_fake2 = self.D2(torch.cat((s, features, z_tilde), dim=1))
+                logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
+                logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
+            else:
+                raise ValueError("Unsupported mode")
+
             l2 = discriminator_loss(logits_real2, logits_fake2)
-
-            logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
-            logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
             l3 = discriminator_loss(logits_real3, logits_fake3)
 
             ci_loss = (l2 - l3) ** 2
