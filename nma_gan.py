@@ -593,7 +593,7 @@ def ema(source, target, decay):
 
 
 class FaceGAN(LightningModule):
-    def __init__(self, encoder, v_len: int, l: float, g: float, batch_size: int, cv_fold=None, **kwargs):
+    def __init__(self, encoder, v_len: int, l: float, g: float, batch_size: int, cv_fold=None, partial=False):
         super().__init__()
         self.l = l
         self.g = g
@@ -605,7 +605,7 @@ class FaceGAN(LightningModule):
             self.D2 = discriminator2()
             self.D3 = discriminator3()
         else:
-            self.mode = 'v'
+            self.mode = 'v' if not partial else 'v_partial'
             self.D2 = discriminator2v(v_len=v_len)
             self.D3 = discriminator3v(v_len=v_len)
         self.encoder = encoder
@@ -707,6 +707,26 @@ class FaceGAN(LightningModule):
 
                 logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
                 logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
+
+            elif self.mode == 'v_partial':
+
+                z_tilde = y.unsqueeze(1)
+
+                v_prime = features[:, 50:].detach().clone()
+                if v_prime[y == 0].size()[0] > 0:
+                    v_prime[y == 0] = v_prime[y == 0][
+                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+                if v_prime[y == 1].size()[0] > 0:
+                    v_prime[y == 1] = v_prime[y == 1][
+                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+
+                s = cf.unsqueeze(1)  # sensitive atts
+
+                logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                logits_fake2 = self.D2(torch.cat((s, features[:, 50:], z_tilde), dim=1))
+
+                logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
+                logits_fake3 = self.D3(torch.cat((features[:, 50:], z_tilde), dim=1))
             else:
                 raise ValueError("Unsupported mode")
             l2 = discriminator_loss(logits_real2, logits_fake2)
@@ -750,6 +770,24 @@ class FaceGAN(LightningModule):
                 logits_fake2 = self.D2(torch.cat((s, features, z_tilde), dim=1))
                 logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
                 logits_fake3 = self.D3(torch.cat((features, z_tilde), dim=1))
+            elif self.mode == 'v_partial':
+                z_tilde = y.unsqueeze(1)
+
+                v_prime = features[:, 50:].detach().clone()
+                if v_prime[y == 0].size()[0] > 0:
+                    v_prime[y == 0] = v_prime[y == 0][
+                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
+                if v_prime[y == 1].size()[0] > 0:
+                    v_prime[y == 1] = v_prime[y == 1][
+                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+
+                s = cf.unsqueeze(1)
+
+                logits_real2 = self.D2(torch.cat((s, v_prime, z_tilde), dim=1))
+                logits_fake2 = self.D2(torch.cat((s, features[:, 50:], z_tilde), dim=1))
+                logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
+                logits_fake3 = self.D3(torch.cat((features[:, 50:], z_tilde), dim=1))
+
             else:
                 raise ValueError("Unsupported mode")
 
