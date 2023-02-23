@@ -36,23 +36,23 @@ class FaceData(Dataset):
         #                                                                     test_size=0.20)
 
         if set == "train":
-            self.x = torch.load(Path(__file__).parent / f"face/X_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+            self.x = torch.load(Path(__file__).parent / f"face/balanced/X_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
                                 map_location=device)
-            self.y = torch.load(Path(__file__).parent / f"face/y_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+            self.y = torch.load(Path(__file__).parent / f"face/balanced/y_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
                                 map_location=device)
-            self.cf = torch.load(Path(__file__).parent / f"face/cf_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+            self.cf = torch.load(Path(__file__).parent / f"face/balanced/cf_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
                                  map_location=device)
         elif set == "val":
-            self.x = torch.load(Path(__file__).parent / f"face/X_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+            self.x = torch.load(Path(__file__).parent / f"face/balanced/X_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
                                 map_location=device)
-            self.y = torch.load(Path(__file__).parent / f"face/y_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+            self.y = torch.load(Path(__file__).parent / f"face/balanced/y_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
                                 map_location=device)
-            self.cf = torch.load(Path(__file__).parent / f"face/cf_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+            self.cf = torch.load(Path(__file__).parent / f"face/balanced/cf_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
                                  map_location=device)
         elif set == "test":
-            self.x = torch.load(Path(__file__).parent / "face/X_test.pt", map_location=device)
-            self.y = torch.load(Path(__file__).parent / "face/y_test.pt", map_location=device)
-            self.cf = torch.load(Path(__file__).parent / "face/cf_test.pt", map_location=device)
+            self.x = torch.load(Path(__file__).parent / "face/balanced/X_test.pt", map_location=device)
+            self.y = torch.load(Path(__file__).parent / "face/balanced/y_test.pt", map_location=device)
+            self.cf = torch.load(Path(__file__).parent / "face/balanced/cf_test.pt", map_location=device)
         else:
             raise NotImplementedError
         self.x = transforms.Resize(dimension)(self.x)
