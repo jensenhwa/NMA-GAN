@@ -612,6 +612,7 @@ class FaceGAN(LightningModule):
         self.FF = nn.Sequential(
             nn.Linear(512, 1),
         )
+        self.race_FF = nn.Linear(512-v_len, 6)
 
     def setup(self, stage=None) -> None:
         """
@@ -788,6 +789,9 @@ class FaceGAN(LightningModule):
                 logits_real3 = self.D3(torch.cat((v_prime, z_tilde), dim=1))
                 logits_fake3 = self.D3(torch.cat((features[:, 50:], z_tilde), dim=1))
 
+                preds_race = self.race_FF(features[:, :50])
+                race_loss = F.cross_entropy(preds_race, cf.long() - 1)
+                self.log("race_loss", race_loss)
             else:
                 raise ValueError("Unsupported mode")
 
@@ -816,9 +820,14 @@ class FaceGAN(LightningModule):
                             f'loss/{key}', losses[key], self.encoder.num_samples)
 
             gender_loss = F.binary_cross_entropy_with_logits(preds, y)
-            loss = diffae_loss + self.l * ci_loss + self.g * gender_loss
+            if self.mode == 'v_partial':
+                loss = diffae_loss + self.l * ci_loss + self.g * gender_loss + 1000 * race_loss
+            else:
+                loss = diffae_loss + self.l * ci_loss + self.g * gender_loss
 
             self.log("new_g_loss", loss, prog_bar=True)
+            self.log("ci_loss", ci_loss)
+            self.log("gender_loss", gender_loss)
 
             # To maintain compatibility with previous models
             self.log("g_loss", diffae_loss + self.l * ci_loss)
