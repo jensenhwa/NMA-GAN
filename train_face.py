@@ -47,6 +47,7 @@ def main(args):
         nodes = 1
         gan = FaceGAN(
             model,
+            "yale",
             512,
             args.l,
             args.g,

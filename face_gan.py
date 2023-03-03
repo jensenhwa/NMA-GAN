@@ -8,6 +8,7 @@ from torch import nn, distributed
 from torch.utils.data import DataLoader, DistributedSampler
 
 from datasets.face_data import FaceData
+from datasets.yale_data import YaleData
 from diffae.choices import TrainMode
 from nma_gan import discriminator2v, discriminator3v, discriminator2, discriminator3, discriminator_loss, get_optimizer
 
@@ -23,9 +24,10 @@ def ema(source, target, decay):
 
 
 class FaceGAN(LightningModule):
-    def __init__(self, encoder, v_len: int, l: float, g: float, r: float,
+    def __init__(self, encoder, data_type, v_len: int, l: float, g: float, r: float,
                  batch_size: int, lr: float, cv_fold=None, partial: int = 0):
         super().__init__()
+        self.data_type = data_type
         self.l = l
         self.g = g
         self.r = r
@@ -61,13 +63,16 @@ class FaceGAN(LightningModule):
             torch.cuda.manual_seed(seed)
             print('local seed:', seed)
         ##############################################
-
-        self.train_data = FaceData(set="train", device=self.device, dimension=128, cv_fold=self.cv_fold)
+        if self.data_type == "face":
+            self.train_data = FaceData(set="train", device=self.device, dimension=128, cv_fold=self.cv_fold)
+            self.val_data = FaceData(set="val", device=self.device, dimension=128, cv_fold=self.cv_fold)
+        elif self.data_type == "yale":
+            self.train_data = YaleData(set="train", device=self.device, dimension=128, cv_fold=self.cv_fold)
+            self.val_data = YaleData(set="val", device=self.device, dimension=128, cv_fold=self.cv_fold)
+        else:
+            raise ValueError("data type not supported")
         print('train data:', len(self.train_data))
-        self.val_data = FaceData(set="val", device=self.device, dimension=128, cv_fold=self.cv_fold)
         print('val data:', len(self.val_data))
-        # self.test_data = FaceData(set="test", device=self.device)
-        # print('test data:', len(self.test_data))
 
     def train_dataloader(self):
         print('on train dataloader start ...')
