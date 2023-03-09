@@ -1,48 +1,51 @@
+import argparse
 import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import torch
-from datasets.face_data import FaceDataForLatent128
-from nma_gan import FaceGAN
 from pytorch_lightning import Trainer
-from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
+
+from datasets.face_data import FaceDataForLatent128
+from face_gan import FaceGAN
 
 diffae_path = Path(".") / "diffae"
 sys.path.append(str(diffae_path.resolve()))
 from templates import LitModel
 from templates_latent import ffhq128_autoenc_130M, ffhq128_autoenc_latent
 
-def get_state_dict():
+def get_state_dict(dir):
+    path = Path(dir)
     conf = ffhq128_autoenc_130M()
     conf.T_eval = 100
     conf.latent_T_eval = 100
     # from choices import TrainMode
     # conf.train_mode = TrainMode.diffusion
-    conf.base_dir = "checkpoints_jh2"  # TODO: replace with desired input model directory
+    conf.base_dir = path
     # conf.pretrain.path = 'diffae/checkpoints/ffhq256_autoenc/last.ckpt'
     # conf.latent_infer_path = 'diffae/checkpoints/ffhq256_autoenc/latent.pkl'
     model = LitModel(conf)
 
-    from nma_gan import FaceGAN
-    gan = FaceGAN(model, 512, 10000, 1, 64)
+    # Most arguments here do not matter
+    gan = FaceGAN(model, "face", 512, 10000, 1, 1, 64, 1e-4, partial=22)
 
-    state = torch.load(f'checkpoints_jh2/{conf.name}/last.ckpt', map_location='cpu')  # TODO: replace with desired input model directory
+    state = torch.load(path / conf.name / 'last.ckpt', map_location='cpu')
     print(gan.load_state_dict(state['state_dict'], strict=False))
     return gan.encoder.state_dict()
 
 
-if __name__ == "__main__":
+def main(args):
     np.random.seed(8)
     conf = ffhq128_autoenc_latent()
     conf.T_eval = 100
     conf.latent_T_eval = 100
     # from choices import TrainMode
     # conf.train_mode = TrainMode.diffusion
-    conf.base_dir = "checkpoints_jh3"  # TODO: replace with desired output directory
+    conf.base_dir = args.output_dir
     conf.pretrain = None
     # junk (just to properly set conds_mean and std as buffers)
     conf.latent_infer_path = 'diffae/checkpoints/ffhq128_autoenc_130M/latent.pkl'
@@ -54,7 +57,7 @@ if __name__ == "__main__":
     model = LitModel(conf)
     model.conds = None
 
-    print(model.load_state_dict(get_state_dict(), strict=False))
+    print(model.load_state_dict(get_state_dict(args.input_dir), strict=False))
 
 
     gpus = [0]
@@ -79,9 +82,11 @@ if __name__ == "__main__":
         else:
             resume = None
 
-    tb_logger = pl_loggers.TensorBoardLogger(save_dir=conf.logdir,
-                                             name=None,
-                                             version='')
+    wandb_logger = WandbLogger(
+        project="nma-gan-latent",
+        entity="jphwa",
+        config=args,
+        save_dir=conf.logdir)
 
     if len(gpus) == 1 and nodes == 1:
         strategy = None
@@ -104,8 +109,23 @@ if __name__ == "__main__":
         # clip in the model instead
         # gradient_clip_val=conf.grad_clip,
         replace_sampler_ddp=True,
-        logger=tb_logger,
+        logger=wandb_logger,
         accumulate_grad_batches=conf.accum_batches,
     )
 
     trainer.fit(model)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument(
+        "--input_dir",
+        help="model load directory"
+    )
+    parser.add_argument(
+        "--output_dir",
+        help="model save directory"
+    )
+    args = parser.parse_args()
+
+    main(args)

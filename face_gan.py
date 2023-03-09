@@ -24,10 +24,12 @@ def ema(source, target, decay):
 
 
 class FaceGAN(LightningModule):
-    def __init__(self, encoder, data_type, v_len: int, l: float, g: float, r: float,
+    def __init__(self, encoder, data_type, mode: str, v_len: int, l: float, g: float, r: float,
                  batch_size: int, lr: float, cv_fold=None, partial: int = 0):
         super().__init__()
         self.data_type = data_type
+        self.mode = mode
+        self.v_len = v_len
         self.l = l
         self.g = g
         self.r = r
@@ -36,8 +38,7 @@ class FaceGAN(LightningModule):
         assert batch_size % get_world_size() == 0
         self.batch_size = batch_size // get_world_size()
         self.cv_fold = cv_fold
-        if v_len < 1:
-            self.mode = 'y'
+        if self.mode == 'y':
             self.D2 = discriminator2()
             self.D3 = discriminator3()
         else:
@@ -48,7 +49,7 @@ class FaceGAN(LightningModule):
         self.FF = nn.Sequential(
             nn.Linear(512, 1),
         )
-        self.race_FF = nn.Linear(partial, 6)
+        self.race_FF: torch.nn.Module = None
 
     def setup(self, stage=None) -> None:
         """
@@ -66,11 +67,14 @@ class FaceGAN(LightningModule):
         if self.data_type == "face":
             self.train_data = FaceData(set="train", device=self.device, dimension=128, cv_fold=self.cv_fold)
             self.val_data = FaceData(set="val", device=self.device, dimension=128, cv_fold=self.cv_fold)
+            self.FF = nn.Linear(self.v_len-self.partial, 1)
         elif self.data_type == "yale":
             self.train_data = YaleData(set="train", device=self.device, dimension=128, cv_fold=self.cv_fold)
             self.val_data = YaleData(set="val", device=self.device, dimension=128, cv_fold=self.cv_fold)
+            self.FF = nn.Linear(self.v_len-self.partial, len(torch.unique(self.train_data.y)))
         else:
             raise ValueError("data type not supported")
+        self.race_FF = nn.Linear(self.partial, len(torch.unique(self.train_data.cf)))
         print('train data:', len(self.train_data))
         print('val data:', len(self.val_data))
 
@@ -113,7 +117,7 @@ class FaceGAN(LightningModule):
         if optimizer_idx == 0:
             with torch.no_grad():
                 features = self.encoder.model.encoder.forward(x)
-                preds = self.FF(features).squeeze()
+                preds = self.FF(features[:, self.partial:]).squeeze()
 
             if self.mode == 'y':
                 z_tilde = y
@@ -133,12 +137,9 @@ class FaceGAN(LightningModule):
                 z_tilde = y.unsqueeze(1)
 
                 v_prime = features.detach().clone()
-                if v_prime[y == 0].size()[0] > 0:
-                    v_prime[y == 0] = v_prime[y == 0][
-                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-                if v_prime[y == 1].size()[0] > 0:
-                    v_prime[y == 1] = v_prime[y == 1][
-                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+                for val in torch.unique(y):
+                    v_prime[y == val] = v_prime[y == val][
+                        torch.randint(v_prime[y == val].size()[0], (v_prime[y == val].size()[0],))]
 
                 s = cf.unsqueeze(1)  # sensitive atts
 
@@ -153,12 +154,9 @@ class FaceGAN(LightningModule):
                 z_tilde = y.unsqueeze(1)
 
                 v_prime = features[:, self.partial:].detach().clone()
-                if v_prime[y == 0].size()[0] > 0:
-                    v_prime[y == 0] = v_prime[y == 0][
-                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-                if v_prime[y == 1].size()[0] > 0:
-                    v_prime[y == 1] = v_prime[y == 1][
-                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+                for val in torch.unique(y):
+                    v_prime[y == val] = v_prime[y == val][
+                        torch.randint(v_prime[y == val].size()[0], (v_prime[y == val].size()[0],))]
 
                 s = cf.unsqueeze(1)  # sensitive atts
 
@@ -179,7 +177,7 @@ class FaceGAN(LightningModule):
         # train generator
         if optimizer_idx == 1:
             features = self.encoder.model.encoder.forward(x)
-            preds = self.FF(features).squeeze()
+            preds = self.FF(features[:, self.partial:])
 
             if self.mode == 'y':
                 z_tilde = y
@@ -190,19 +188,16 @@ class FaceGAN(LightningModule):
                 s = cf
 
                 logits_real2 = self.D2(torch.stack((s, y_prime, z_tilde), dim=1))
-                logits_fake2 = self.D2(torch.stack((s, F.sigmoid(preds), z_tilde), dim=1))
+                logits_fake2 = self.D2(torch.stack((s, F.sigmoid(preds.squeeze()), z_tilde), dim=1))
                 logits_real3 = self.D3(torch.stack((y_prime, z_tilde), dim=1))
-                logits_fake3 = self.D3(torch.stack((F.sigmoid(preds), z_tilde), dim=1))
+                logits_fake3 = self.D3(torch.stack((F.sigmoid(preds.squeeze()), z_tilde), dim=1))
             elif self.mode == 'v':
                 z_tilde = y.unsqueeze(1)
 
                 v_prime = features.detach().clone()
-                if v_prime[y == 0].size()[0] > 0:
-                    v_prime[y == 0] = v_prime[y == 0][
-                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-                if v_prime[y == 1].size()[0] > 0:
-                    v_prime[y == 1] = v_prime[y == 1][
-                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+                for val in torch.unique(y):
+                    v_prime[y == val] = v_prime[y == val][
+                        torch.randint(v_prime[y == val].size()[0], (v_prime[y == val].size()[0],))]
 
                 s = cf.unsqueeze(1)
 
@@ -214,12 +209,9 @@ class FaceGAN(LightningModule):
                 z_tilde = y.unsqueeze(1)
 
                 v_prime = features[:, self.partial:].detach().clone()
-                if v_prime[y == 0].size()[0] > 0:
-                    v_prime[y == 0] = v_prime[y == 0][
-                        torch.randint(v_prime[y == 0].size()[0], (v_prime[y == 0].size()[0],))]
-                if v_prime[y == 1].size()[0] > 0:
-                    v_prime[y == 1] = v_prime[y == 1][
-                        torch.randint(v_prime[y == 1].size()[0], (v_prime[y == 1].size()[0],))]
+                for val in torch.unique(y):
+                    v_prime[y == val] = v_prime[y == val][
+                        torch.randint(v_prime[y == val].size()[0], (v_prime[y == val].size()[0],))]
 
                 s = cf.unsqueeze(1)
 
@@ -229,7 +221,7 @@ class FaceGAN(LightningModule):
                 logits_fake3 = self.D3(torch.cat((features[:, self.partial:], z_tilde), dim=1))
 
                 preds_race = self.race_FF(features[:, :self.partial])
-                race_loss = F.cross_entropy(preds_race, cf.long() - 1)
+                race_loss = F.cross_entropy(preds_race, cf.long())
                 self.log("race_loss", race_loss)
             else:
                 raise ValueError("Unsupported mode")
@@ -256,8 +248,10 @@ class FaceGAN(LightningModule):
                     if key in losses:
                         self.logger.experiment.add_scalar(
                             f'loss/{key}', losses[key], self.encoder.num_samples)
-
-            gender_loss = F.binary_cross_entropy_with_logits(preds, y)
+            if self.data_type == 'face':
+                gender_loss = F.binary_cross_entropy_with_logits(preds.squeeze(), y)
+            else:
+                gender_loss = F.cross_entropy(preds, y.long())
             if self.mode == 'v_partial':
                 loss = diffae_loss + self.l * ci_loss + self.g * gender_loss + self.r * race_loss
             else:
@@ -291,16 +285,18 @@ class FaceGAN(LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y, cf = batch
         features = self.encoder.encode(x)
-        y_preds = self.FF(features).squeeze()
-        y_preds = (torch.sign(y_preds) + 1) / 2
-        # Classes range from 1 to 6 inclusive (no 0)
-        one_hot = torch.nn.functional.one_hot(cf.long(), num_classes=7)[:, 1:].bool()
-        # accuracies by skin class
-        train_accs = torch.sum(one_hot & (
-                    y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == y.unsqueeze(1).expand(
-                one_hot.shape) * one_hot), dim=0) / torch.sum(one_hot, dim=0)
+        y_preds = self.FF(features[:, self.partial:])
+        if self.data_type == 'face':
+            y_preds = (torch.sign(y_preds.squeeze()) + 1) / 2
+            one_hot = torch.nn.functional.one_hot(cf.long(), num_classes=len(torch.unique(self.train_data.cf))).bool()
+            # accuracies by skin class
+            train_accs = torch.sum(one_hot & (
+                        y_preds.unsqueeze(1).expand(one_hot.shape) * one_hot == y.unsqueeze(1).expand(
+                    one_hot.shape) * one_hot), dim=0) / torch.sum(one_hot, dim=0)
+            self.log("per_skin_acc", {str(i): x for i, x in enumerate(train_accs)}, sync_dist=True)
+        else:
+            y_preds = torch.argmax(y_preds, dim=-1)
         train_acc = (torch.sum(y_preds == y) / len(x)).item()
-        self.log("per_skin_acc", {str(i): x for i, x in enumerate(train_accs)}, sync_dist=True)
         self.log("acc", train_acc, sync_dist=True)
 
     def configure_optimizers(self):

@@ -56,6 +56,7 @@ class FaceData(Dataset):
         else:
             raise NotImplementedError
         self.x = transforms.Resize(dimension)(self.x)
+        self.cf -= 1
 
     def __getitem__(self, index):
         return self.x[index], self.y[index], self.cf[index]
