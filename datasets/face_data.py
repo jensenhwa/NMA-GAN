@@ -43,13 +43,13 @@ class FaceData(Dataset):
             self.cf = torch.load(Path(__file__).parent / f"face/balanced/cf_train{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
                                  map_location=device)
         elif set == "val":
-            self.x = torch.load(Path(__file__).parent / f"face/balanced/X_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
-                                map_location=device)
-            self.y = torch.load(Path(__file__).parent / f"face/balanced/y_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
-                                map_location=device)
-            self.cf = torch.load(Path(__file__).parent / f"face/balanced/cf_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
-                                 map_location=device)
-        elif set == "test":
+#             self.x = torch.load(Path(__file__).parent / f"face/balanced/X_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+#                                 map_location=device)
+#             self.y = torch.load(Path(__file__).parent / f"face/balanced/y_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+#                                 map_location=device)
+#             self.cf = torch.load(Path(__file__).parent / f"face/balanced/cf_val{('_f' + str(cv_fold)) if cv_fold else ''}.pt",
+#                                  map_location=device)
+#         elif set == "test":
             self.x = torch.load(Path(__file__).parent / "face/balanced/X_test.pt", map_location=device)
             self.y = torch.load(Path(__file__).parent / "face/balanced/y_test.pt", map_location=device)
             self.cf = torch.load(Path(__file__).parent / "face/balanced/cf_test.pt", map_location=device)

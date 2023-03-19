@@ -31,7 +31,7 @@ def get_state_dict(dir):
     model = LitModel(conf)
 
     # Most arguments here do not matter
-    gan = FaceGAN(model, "face", 512, 10000, 1, 1, 64, 1e-4, partial=22)
+    gan = FaceGAN(model, "face", "v", 512, 10000, 1, 1, 64, 1e-4, partial=22)
 
     state = torch.load(path / conf.name / 'last.ckpt', map_location='cpu')
     print(gan.load_state_dict(state['state_dict'], strict=False))
@@ -95,7 +95,8 @@ def main(args):
 
     print("training now")
     trainer = Trainer(
-        max_steps=conf.total_samples // conf.batch_size_effective,
+#         max_steps=conf.total_samples // conf.batch_size_effective,
+        max_epochs=3000,
         resume_from_checkpoint=resume,
         gpus=gpus,
         num_nodes=nodes,

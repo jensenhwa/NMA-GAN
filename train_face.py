@@ -47,7 +47,8 @@ def main(args):
         nodes = 1
         gan = FaceGAN(
             model,
-            "yale",
+            "face",
+            "y",
             512,
             args.l,
             args.g,
@@ -90,7 +91,7 @@ def main(args):
 
         print("training now")
         trainer = Trainer(
-            max_epochs=1000,
+            max_epochs=5000,  # 1000 epochs is usually sufficient for v-space
             resume_from_checkpoint=resume,
             gpus=gpus,
             num_nodes=nodes,

@@ -2,7 +2,7 @@ import wandb
 
 sweep_configuration = {
     'method': 'random',
-    'name': 'sweep_with_raceff',
+    'name': 'sweep_yale',
     'metric': {'goal': 'maximize', 'name': 'acc'},
     'parameters':
     {
